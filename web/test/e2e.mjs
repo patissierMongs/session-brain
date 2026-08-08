@@ -1,7 +1,7 @@
 // Headless e2e against the stub server (dist build must exist).
 import { chromium } from "playwright";
 
-const BASE = "http://localhost:7791";
+const BASE = process.env.BASE || "http://localhost:7791";
 const results = [];
 const check = (name, ok, extra = "") => {
   results.push({ name, ok });
@@ -19,7 +19,7 @@ await page.waitForTimeout(700);
 check("list renders", (await page.locator(".sess-row").count()) === 2);
 
 // ---- open session (canvas) ----
-await page.locator(".sess-row").first().click();
+await page.locator('.sess-row:has-text("panic")').first().click();
 await page.waitForTimeout(1200);
 check("canvas mounts", (await page.locator("#zoomWrap > .panel").count()) === 1);
 check("timeline zone", (await page.locator(".tl-bar").count()) === 1);
@@ -77,7 +77,7 @@ await page.goto(BASE + "/#/");
 await page.waitForTimeout(500);
 check("teardown clears timeline", (await page.locator(".tl-bar").count()) === 0);
 check("teardown clears overlays", (await page.locator(".overview").count()) === 0);
-await page.locator(".sess-row").first().click();
+await page.locator('.sess-row:has-text("panic")').first().click();
 await page.waitForTimeout(1200);
 check("remount ok", (await page.locator("#zoomWrap > .panel").count()) === 1);
 check("note persisted (localStorage)", (await page.locator(".note-card").count()) === 1);
