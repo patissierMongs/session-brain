@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>session-brain</title>
+<style>
+  /* ================= design tokens (dataviz reference palette, dark mode) ================= */
+  :root {
+    color-scheme: dark;
+    --page:        #0d0d0d;
+    --surface-1:   #1a1a19;
+    --surface-2:   #141413;
+    --surface-3:   #1f1f1e;
+    --text-1:      #ffffff;
+    --text-2:      #c3c2b7;
+    --text-3:      #898781;
+    --grid:        #2c2c2a;
+    --baseline:    #383835;
+    --border:      rgba(255,255,255,0.10);
+    --border-soft: rgba(255,255,255,0.06);
+    --main:        #3987e5;
+    --sans: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --map-w: 64px;
+    --header-h: 50px;
+    --read-w: 760px;
+    --rail-w: 330px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--page); color: var(--text-1); font: 13px/1.55 var(--sans); overflow: hidden; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+  a { color: inherit; text-decoration: none; }
+  input, select { font: inherit; color: var(--text-1); background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px; outline: none; }
+  input:focus, select:focus { border-color: rgba(57,135,229,0.55); }
+  code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 4px; padding: 0 4px; color: var(--text-2); }
+  mark { background: rgba(201,133,0,0.30); color: #f2d597; border-radius: 3px; padding: 0 2px; }
+
+  /* ================= top header ================= */
+  .hdr {
+    height: var(--header-h); display: flex; align-items: center; gap: 14px;
+    padding: 0 16px; background: var(--surface-1); border-bottom: 1px solid var(--border);
+    position: relative; z-index: 20;
+  }
+  .hdr .brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13.5px; }
+  .hdr .brand .logo { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg,#3987e5,#1c5cab); display: grid; place-items: center; color: #fff; }
+  .hdr nav { display: flex; gap: 4px; margin-left: 6px; }
+  .hdr nav a {
+    font-size: 12.5px; color: var(--text-3); padding: 5px 12px; border-radius: 7px;
+    transition: background .13s, color .13s;
+  }
+  .hdr nav a:hover { color: var(--text-1); background: rgba(255,255,255,0.05); }
+  .hdr nav a.active { color: var(--text-1); background: rgba(57,135,229,0.14); }
+  .hdr .spacer { flex: 1; }
+  .hdr .demo-flag {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .05em; color: #f2c57a;
+    border: 1px solid rgba(201,133,0,0.5); background: rgba(201,133,0,0.12);
+    border-radius: 5px; padding: 2px 8px;
+  }
+
+  #view { height: calc(100% - var(--header-h)); }
+
+  /* ================= generic page (list / search) ================= */
+  .page { height: 100%; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--baseline) transparent; }
+  .page-inner { max-width: 880px; margin: 0 auto; padding: 28px 24px 80px; }
+  .page h1 { font-size: 16px; margin: 0 0 4px; }
+  .page .sub { font-size: 12px; color: var(--text-3); margin-bottom: 18px; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar input[type=text], .toolbar input[type=search] { flex: 1; min-width: 200px; }
+
+  /* session list */
+  .sess-list { border: 1px solid var(--border-soft); border-radius: 10px; overflow: hidden; }
+  .sess-row {
+    display: grid; grid-template-columns: 118px 120px 1fr auto; gap: 12px; align-items: center;
+    padding: 10px 14px; border-top: 1px solid var(--border-soft);
+    background: var(--surface-1); transition: background .12s; cursor: pointer;
+  }
+  .sess-row:first-child { border-top: none; }
+  .sess-row:hover { background: #212120; }
+  .sess-row .d { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+  .sess-row .p { font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess-row .p .pchip { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 5px; padding: 1px 7px; font-family: var(--mono); font-size: 10.5px; }
+  .sess-row .t { font-size: 12.8px; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess-row .m { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); white-space: nowrap; display: flex; gap: 10px; }
+  .sess-row .m b { color: var(--text-2); font-weight: 600; }
+  .list-empty { padding: 26px; text-align: center; color: var(--text-3); font-size: 12.5px; background: var(--surface-1); }
+
+  /* search */
+  .sem-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none; padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px; }
+  .sem-toggle input { accent-color: var(--main); margin: 0; }
+  .search-note { font-size: 11.5px; color: var(--text-3); margin: 8px 2px 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .search-note .warn { color: #f2c57a; }
+  .hit {
+    display: block; width: 100%; text-align: left;
+    background: var(--surface-1); border: 1px solid var(--border-soft); border-radius: 10px;
+    padding: 11px 14px; margin-bottom: 10px; transition: border-color .12s, background .12s; cursor: pointer;
+  }
+  .hit:hover { border-color: var(--border); background: #212120; }
+  .hit .hd { display: flex; align-items: baseline; gap: 9px; margin-bottom: 4px; flex-wrap: wrap; }
+  .hit .title { font-size: 12.8px; font-weight: 600; color: var(--text-1); }
+  .hit .proj { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+  .hit .ts { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+  .hit .kind { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; border-radius: 4px; padding: 1px 6px; }
+  .hit .kind.main { color: #9cc4f2; background: rgba(57,135,229,0.14); border: 1px solid rgba(57,135,229,0.35); }
+  .hit .kind.subagent { color: #8fd9bd; background: rgba(25,158,112,0.14); border: 1px solid rgba(25,158,112,0.4); }
+  .hit .snippet { font-size: 12.3px; color: var(--text-2); line-height: 1.5; }
+  .hit .role-tag { font-size: 10.5px; font-weight: 650; color: var(--text-3); margin-right: 6px; }
+
+  /* loading / error */
+  .center-box { height: 100%; display: grid; place-items: center; }
+  .load { color: var(--text-3); font-size: 12.5px; display: flex; align-items: center; gap: 10px; }
+  .spin { width: 14px; height: 14px; border: 2px solid var(--baseline); border-top-color: var(--main); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .err-box { max-width: 460px; text-align: center; padding: 30px; }
+  .err-box .ico { font-size: 26px; margin-bottom: 10px; }
+  .err-box h2 { font-size: 14px; margin: 0 0 8px; }
+  .err-box p { font-size: 12.3px; color: var(--text-2); margin: 0 0 18px; line-height: 1.6; }
+  .err-box .detail { font-family: var(--mono); font-size: 11px; color: var(--text-3); background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 7px; padding: 8px 11px; margin-bottom: 18px; word-break: break-all; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.3px; font-weight: 600;
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px;
+    color: var(--text-1); transition: background .13s;
+  }
+  .btn:hover { background: rgba(255,255,255,0.06); }
+  .btn.primary { background: var(--main); border-color: transparent; color: #0d0d0d; }
+  .btn.primary:hover { filter: brightness(1.12); background: var(--main); }
+  .btn.amber { border-color: rgba(201,133,0,0.5); color: #f2c57a; }
+  .btn.amber:hover { background: rgba(201,133,0,0.10); }
+
+  /* ================= session view (v2 — reading-first) ================= */
+  .session-view { height: 100%; display: flex; flex-direction: column; }
+  .subhdr {
+    display: flex; align-items: center; gap: 11px; flex-wrap: nowrap;
+    padding: 8px 16px; background: var(--surface-1); border-bottom: 1px solid var(--border-soft);
+    min-height: 46px;
+  }
+  .subhdr .back { color: var(--text-3); font-size: 12.5px; padding: 4px 8px; border-radius: 6px; }
+  .subhdr .back:hover { color: var(--text-1); background: rgba(255,255,255,0.05); }
+  .subhdr .stitle { font-weight: 650; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 60px; }
+  .subhdr .chip { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
+  .subhdr .dates { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
+  .subhdr .spacer { flex: 1; }
+  .resume-cmd {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 10.8px; color: var(--text-2);
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+    border-radius: 7px; padding: 4px 6px 4px 10px; white-space: nowrap; max-width: 300px;
+  }
+  .resume-cmd .cmdtext { overflow: hidden; text-overflow: ellipsis; }
+  .resume-cmd button { color: var(--text-3); border: 1px solid var(--border-soft); border-radius: 5px; padding: 2px 7px; font-size: 10px; transition: color .13s, background .13s; }
+  .resume-cmd button:hover { color: var(--text-1); background: rgba(255,255,255,0.07); }
+  .stat-badge {
+    display: flex; align-items: center; gap: 7px; font-size: 11.8px; color: var(--text-2);
+    background: rgba(57,135,229,0.10); border: 1px solid rgba(57,135,229,0.30);
+    border-radius: 999px; padding: 3px 11px; white-space: nowrap;
+  }
+  .stat-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--main); }
+  .stat-badge b { color: var(--text-1); font-weight: 600; }
+
+  .app { display: flex; flex: 1; min-height: 0; }
+  .scroller { flex: 1; overflow-y: auto; position: relative; scrollbar-width: none; background: var(--page); }
+  .scroller::-webkit-scrollbar { display: none; }
+  .thread-wrap { max-width: var(--read-w); margin: 0 auto; position: relative; }
+  .session-view.has-forks .thread-wrap { max-width: calc(var(--read-w) + var(--rail-w) + 26px); }
+  .thread { max-width: var(--read-w); margin: 0 auto; padding: 30px 24px 26vh; }
+  .session-view.has-forks .thread { margin: 0; }
+  .branch-rail { position: absolute; top: 0; bottom: 0; left: calc(var(--read-w) + 26px); width: var(--rail-w); }
+  .thread-intro { text-align: center; font-size: 11.5px; color: var(--text-3); padding-bottom: 26px; }
+  .thread-intro b { color: var(--text-2); font-weight: 600; }
+
+  /* ---- chat rows (Claude Desktop style) ---- */
+  .msg-row { display: flex; margin: 0 0 22px; }
+  .msg-row.user { justify-content: flex-end; }
+  .bubble { min-width: 0; position: relative; }
+  .msg-row.user .bubble {
+    max-width: 82%;
+    background: rgba(57,135,229,0.13); border: 1px solid rgba(57,135,229,0.22);
+    border-radius: 16px 4px 16px 16px; padding: 10px 16px 9px;
+  }
+  .msg-row.asst .bubble {
+    max-width: 85%;
+    background: var(--surface-1); border: 1px solid var(--border-soft);
+    border-radius: 4px 16px 16px 16px; padding: 10px 16px 9px;
+  }
+  .bubble .body {
+    font-size: 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+    min-width: 0;
+  }
+  .msg-row.asst .body { color: #d9d8cf; }
+  .msg-row.user .body { color: #e9e8e1; }
+  .msg-meta {
+    font-family: var(--mono); font-size: 10px; color: var(--text-3);
+    margin-top: 6px; opacity: 0; transition: opacity .15s; user-select: none;
+  }
+  .msg-row:hover .msg-meta { opacity: .85; }
+  .msg-row.user .msg-meta { text-align: right; }
+
+  /* markdown-ish code rendering inside assistant bodies */
+  .cb {
+    display: block; background: var(--surface-2); border: 1px solid var(--border-soft);
+    border-radius: 9px; padding: 10px 13px; margin: 4px 0;
+    font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text-2);
+    overflow-x: auto; white-space: pre;
+  }
+  .cb .cb-lang { display: block; font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin-bottom: 6px; user-select: none; }
+  .body code.ic { font-family: var(--mono); font-size: 0.9em; background: rgba(255,255,255,0.07); border: 1px solid var(--border-soft); border-radius: 4px; padding: 0 4px; color: #dcdbd2; }
+  .body b { color: inherit; font-weight: 650; }
+
+  /* ---- thinking / tool-step accordions (shared visual language) ---- */
+  .think { margin: 0 0 10px; max-width: 100%; }
+  .think-toggle, .steps-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: var(--text-3); padding: 2px 4px; border-radius: 6px;
+    transition: color .13s, background .13s; user-select: none;
+  }
+  .think-toggle:hover, .steps-toggle:hover { color: var(--text-2); background: rgba(255,255,255,0.04); }
+  .think-toggle .chev, .steps-toggle .chev { font-size: 9px; transition: transform .16s; display: inline-block; }
+  .think-toggle[aria-expanded="true"] .chev, .steps-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .think-body {
+    display: none; margin: 7px 0 2px 6px; padding: 2px 0 2px 13px;
+    border-left: 2px solid var(--grid);
+    font-size: 12.3px; line-height: 1.6; font-style: italic; color: var(--text-3);
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .think.open .think-body { display: block; }
+  .think-body .think-sep { display: block; height: 10px; }
+
+  /* ---- tool-step accordion ---- */
+  .steps { margin: -4px 0 18px; }
+  .steps-body {
+    display: none; margin: 7px 0 2px 6px; padding: 2px 0 2px 13px;
+    border-left: 2px solid var(--grid);
+  }
+  .steps.open .steps-body { display: block; }
+  .steps-body .step {
+    display: flex; gap: 8px; align-items: flex-start;
+    font-family: var(--mono); font-size: 11.3px; line-height: 1.55; color: var(--text-3);
+    background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 7px;
+    padding: 5px 9px; margin: 0 0 6px;
+  }
+  .steps-body .step .g { flex-shrink: 0; color: var(--baseline); user-select: none; }
+  .steps-body .step .step-txt { white-space: pre-wrap; word-break: break-word; min-width: 0; }
+  .steps-body .step.empty .step-txt { font-style: italic; }
+
+  /* ---- fork anchor dot (wide layout: association marker only) ---- */
+  .fork-dot {
+    position: absolute; top: -5px; width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid var(--page); z-index: 3; pointer-events: none;
+  }
+  .msg-row.asst .fork-dot { left: -5px; }
+  .msg-row.user .fork-dot { right: -5px; }
+
+  /* ---- right-margin branch cards (always visible when forks exist) ---- */
+  .rc-card {
+    position: absolute; left: 0; width: 100%;
+    background: var(--surface-3); border: 1px solid var(--border); border-left-width: 3px;
+    border-radius: 10px; padding: 10px 12px 11px;
+  }
+  .rc-card .rc-conn { position: absolute; left: -21px; top: 15px; width: 21px; height: 2px; opacity: .75; }
+  .rc-card .rc-conn::before {
+    content: ""; position: absolute; left: -5px; top: -2.5px;
+    width: 7px; height: 7px; border-radius: 50%; background: inherit;
+  }
+  .rc-card .rc-head { display: flex; align-items: baseline; gap: 7px; margin-bottom: 6px; }
+  .rc-card .rc-name { font-weight: 650; font-size: 11.5px; }
+  .rc-card .rc-time { margin-left: auto; font-family: var(--mono); font-size: 9.8px; color: var(--text-3); white-space: nowrap; }
+  .rc-card .rc-quote {
+    border-left: 2px solid var(--baseline); padding: 1px 0 1px 8px; margin: 0 0 8px;
+    color: var(--text-2); font-size: 11.5px; line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .rc-card .rc-quote .q-role { font-size: 10px; font-weight: 650; color: var(--text-3); margin-right: 5px; }
+  .rc-card .rc-stats {
+    display: flex; gap: 10px; font-family: var(--mono); font-size: 9.8px; color: var(--text-3);
+    margin-bottom: 9px; white-space: nowrap; overflow: hidden;
+  }
+  .rc-card .rc-stats b { color: var(--text-2); font-weight: 600; }
+  .rc-card .switch-btn { font-size: 11px; padding: 4px 11px; }
+  .rc-card.flash { animation: flash 1.4s ease-out 1; }
+
+  /* ---- per-message fork affordance (narrow-viewport fallback: hover chip + inline expansion) ---- */
+  .fork-chip {
+    position: absolute; top: -11px; z-index: 3;
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px; line-height: 1.5; color: var(--text-2);
+    border: 1px solid; border-radius: 999px; padding: 2px 9px;
+    background: var(--surface-3);
+    opacity: .25; transition: opacity .15s, box-shadow .15s;
+    white-space: nowrap; user-select: none;
+  }
+  .msg-row.asst .fork-chip { left: -6px; }
+  .msg-row.user .fork-chip { right: -6px; }
+  .msg-row:hover .fork-chip, .fork-chip:hover, .fork-chip:focus-visible,
+  .fork-chip[aria-expanded="true"], .fork-chip.flash { opacity: 1; }
+  .fork-chip b { font-weight: 650; }
+  .fork-chip .fc-label { display: none; }
+  .msg-row:hover .fc-label, .fork-chip:hover .fc-label, .fork-chip[aria-expanded="true"] .fc-label { display: inline; }
+  .fork-chip.flash { animation: flash 1.4s ease-out 1; }
+  @keyframes flash { 0% { box-shadow: 0 0 0 0 rgba(57,135,229,0.55); } 60% { box-shadow: 0 0 0 9px rgba(57,135,229,0); } 100% { box-shadow: none; } }
+
+  .fork-inline { display: none; margin: -12px 0 24px; max-width: 640px; animation: pv-in .16s ease-out; }
+  .fork-inline.open { display: block; }
+  .fork-inline.from-user { margin-left: auto; }
+  @keyframes pv-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .pv-alt {
+    background: var(--surface-3); border: 1px solid var(--border); border-left-width: 3px;
+    border-radius: 10px; padding: 12px 14px 12px 15px; margin-bottom: 8px;
+  }
+  .pv-alt .pv-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 8px; }
+  .pv-alt .pv-name { font-weight: 650; font-size: 12.5px; }
+  .pv-alt .pv-time { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+  .pv-alt .pv-quote {
+    border-left: 2px solid var(--baseline); padding: 2px 0 2px 10px; margin: 0 0 10px;
+    color: var(--text-2); font-size: 12.3px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .pv-alt .q-role { font-size: 10.5px; font-weight: 650; color: var(--text-3); margin-right: 6px; }
+  .pv-alt .pv-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 11px; }
+  .pv-alt .pv-stat { font-size: 10.8px; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 5px; padding: 2px 8px; }
+  .pv-alt .pv-stat b { color: var(--text-1); font-weight: 600; }
+  .switch-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; color: #0d0d0d; border-radius: 7px; padding: 6px 13px; transition: filter .15s, transform .1s; }
+  .switch-btn:hover { filter: brightness(1.13); }
+  .switch-btn:active { transform: translateY(1px); }
+  .pv-hint { font-size: 10.8px; color: var(--text-3); margin-left: 10px; }
+
+  /* ---- minimap (simplified) ---- */
+  .minimap { width: var(--map-w); flex-shrink: 0; background: var(--surface-2); border-left: 1px solid var(--border); position: relative; cursor: pointer; user-select: none; }
+  .mm-layer { position: absolute; inset: 6px; }
+  .mm-bar { position: absolute; border-radius: 1px; pointer-events: none; }
+  .mm-bar.u { background: rgba(57,135,229,0.85); right: 8px; width: 16px; }
+  .mm-bar.a { background: #41413b; left: 8px; width: 24px; }
+  .mm-bar.t { background: #262624; left: 20px; width: 12px; }
+  .mm-fork { position: absolute; left: 5px; right: 5px; height: 2px; border-radius: 2px; pointer-events: none; opacity: .9; }
+  .mm-viewport { position: absolute; left: 2px; right: 2px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.22); border-radius: 4px; pointer-events: none; transition: background .15s; }
+  .minimap:hover .mm-viewport { background: rgba(255,255,255,0.11); }
+
+  /* toast */
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translate(-50%,16px);
+    background: #232322; border: 1px solid var(--border); border-radius: 9px; padding: 9px 16px;
+    font-size: 12px; color: var(--text-1); box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+    opacity: 0; pointer-events: none; transition: opacity .22s, transform .22s; z-index: 50;
+    display: flex; align-items: center; gap: 8px; max-width: 80vw;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%,0); }
+  .toast .tdot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ---- responsive: wide = margin rail, narrow = corner chip fallback ---- */
+  @media (min-width: 1200px) {
+    .session-view.has-forks .fork-chip, .session-view.has-forks .fork-inline { display: none !important; }
+  }
+  @media (max-width: 1199.98px) {
+    .session-view.has-forks .thread-wrap { max-width: var(--read-w); }
+    .session-view.has-forks .thread { margin: 0 auto; }
+    .branch-rail, .fork-dot { display: none !important; }
+  }
+
+  .fading { animation: thread-in .25s ease-out; }
+  @keyframes thread-in { from { opacity: .25; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <a class="brand" href="#/">
+    <span class="logo">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+        <circle cx="6" cy="4" r="2.4"/><circle cx="6" cy="20" r="2.4"/><circle cx="18" cy="9" r="2.4"/>
+        <path d="M6 6.5v11M6 13c0-4 12-1 12-1.5"/>
+      </svg>
+    </span>
+    session-brain
+  </a>
+  <nav>
+    <a href="#/" id="navList">세션 목록</a>
+    <a href="#/search" id="navSearch">검색</a>
+  </nav>
+  <div class="spacer"></div>
+  <span class="demo-flag" id="demoFlag" style="display:none">DEMO 데이터</span>
+</header>
+
+<div id="view"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================================
+   session-brain SPA v2 — 세션 목록 / reading-first 대화 뷰어 / 검색
+   같은 origin의 /api/* 를 사용한다. 서버가 없으면 데모 데이터를 제안한다.
+   ============================================================================ */
+
+/* ---------------- utilities ---------------- */
+
+const $view = document.getElementById("view");
+const FORK_COLORS = ["#d95926", "#199e70", "#c98500", "#d55181", "#9085e9", "#008300"];
+const OVERFLOW_COLOR = "#898781";
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+function pad(n) { return String(n).padStart(2, "0"); }
+function fmtDT(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fmtTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fmtDurMs(ms) {
+  if (ms == null || isNaN(ms) || ms < 0) return "—";
+  const min = Math.round(ms / 60000);
+  if (min < 1) return "1분 미만";
+  if (min < 60) return `${min}분`;
+  const h = Math.floor(min / 60);
+  return `${h}시간 ${min % 60}분`;
+}
+let toastTimer;
+function showToast(html) {
+  const t = document.getElementById("toast");
+  t.innerHTML = html;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 4200);
+}
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  }
+  return Promise.resolve(fallbackCopy(text));
+}
+function fallbackCopy(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.cssText = "position:fixed;opacity:0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); } catch (e) {}
+  ta.remove();
+}
+
+/* markdown-mini: XSS-safe. 전부 escape한 뒤 ```fence``` / `inline` / **bold** 만 살린다. */
+function renderInline(escaped) {
+  return escaped
+    .replace(/`([^`\n]+)`/g, '<code class="ic">$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+}
+function renderRich(raw) {
+  const parts = String(raw == null ? "" : raw).split("```");
+  if (parts.length === 1) return renderInline(esc(parts[0]));
+  let out = "";
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      let code = parts[i], lang = "";
+      const nl = code.indexOf("\n");
+      const head = nl >= 0 ? code.slice(0, nl).trim() : "";
+      if (nl >= 0 && /^[\w#+.-]{0,20}$/.test(head)) { lang = head; code = code.slice(nl + 1); }
+      code = code.replace(/\n$/, "");
+      out += `<span class="cb">${lang ? `<span class="cb-lang">${esc(lang)}</span>` : ""}${esc(code)}</span>`;
+    } else {
+      let text = parts[i];
+      if (i > 0) text = text.replace(/^\n/, "");          // fence 직후 개행 제거
+      if (i < parts.length - 1) text = text.replace(/\n$/, ""); // fence 직전 개행 제거
+      out += renderInline(esc(text));
+    }
+  }
+  return out;
+}
+
+/* ---------------- API layer (+ demo fallback) ---------------- */
+
+const appState = { demo: false, sessionsCache: null, searchState: { q: "", semantic: true, project: "" } };
+
+async function fetchJSON(url) {
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    const err = new Error("서버에 연결할 수 없습니다. session-brain 서버(localhost:7777)가 실행 중인지 확인하세요.");
+    err.detail = String(e); err.network = true;
+    throw err;
+  }
+  if (!res.ok) {
+    let body = "";
+    try { body = await res.text(); } catch (e) {}
+    const err = new Error(`서버가 오류를 반환했습니다 (HTTP ${res.status}).`);
+    err.detail = `${url} → ${res.status} ${res.statusText}${body ? " · " + body.slice(0, 200) : ""}`;
+    throw err;
+  }
+  return res.json();
+}
+
+const api = {
+  async sessions() {
+    if (appState.demo) return { sessions: DEMO.sessions };
+    return fetchJSON("/api/sessions");
+  },
+  async session(id) {
+    if (appState.demo) {
+      const d = DEMO.details[id];
+      if (!d) throw new Error("데모 데이터에 없는 세션입니다.");
+      return d;
+    }
+    return fetchJSON("/api/session/" + encodeURIComponent(id));
+  },
+  async search(q, semantic, project) {
+    if (appState.demo) return DEMO.search(q, project);
+    const p = new URLSearchParams({ q, semantic: semantic ? "1" : "0", limit: "20" });
+    if (project) p.set("project", project);
+    return fetchJSON("/api/search?" + p.toString());
+  },
+};
+
+function enableDemo() {
+  appState.demo = true;
+  appState.sessionsCache = null;
+  document.getElementById("demoFlag").style.display = "";
+  showToast("데모 데이터 모드로 전환했습니다 — 실제 서버 데이터가 아닙니다.");
+}
+
+/* ---------------- rendering helpers ---------------- */
+
+function renderLoading(msg) {
+  $view.innerHTML = `<div class="center-box"><div class="load"><span class="spin"></span>${esc(msg || "불러오는 중…")}</div></div>`;
+}
+function renderError(err, opts) {
+  opts = opts || {};
+  const demoBtn = opts.offerDemo ? `<button class="btn amber" id="errDemo">데모 데이터로 보기</button>` : "";
+  const backBtn = opts.backHash ? `<a class="btn" href="${opts.backHash}">← 돌아가기</a>` : "";
+  $view.innerHTML = `
+    <div class="center-box"><div class="err-box">
+      <div class="ico">⚠️</div>
+      <h2>데이터를 불러오지 못했습니다</h2>
+      <p>${esc(err.message || String(err))}</p>
+      ${err.detail ? `<div class="detail">${esc(err.detail)}</div>` : ""}
+      <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+        <button class="btn primary" id="errRetry">다시 시도</button>
+        ${backBtn}${demoBtn}
+      </div>
+    </div></div>`;
+  const r = document.getElementById("errRetry");
+  if (r) r.addEventListener("click", () => route());
+  const d = document.getElementById("errDemo");
+  if (d) d.addEventListener("click", () => { enableDemo(); route(); });
+}
+
+/* ============================================================================
+   Route: #/ — session list
+   ============================================================================ */
+
+async function viewList() {
+  renderLoading("세션 목록 불러오는 중…");
+  let data;
+  try {
+    data = appState.sessionsCache ? { sessions: appState.sessionsCache } : await api.sessions();
+  } catch (err) {
+    renderError(err, { offerDemo: !appState.demo });
+    return;
+  }
+  const sessions = data.sessions || [];
+  appState.sessionsCache = sessions;
+
+  $view.innerHTML = `
+    <div class="page"><div class="page-inner">
+      <h1>세션 목록</h1>
+      <div class="sub">episodic memory에 인덱싱된 Claude Code 세션 · ${sessions.length}개</div>
+      <div class="toolbar">
+        <input type="search" id="listFilter" placeholder="프로젝트 / 제목으로 필터…" autocomplete="off">
+      </div>
+      <div class="sess-list" id="sessList"></div>
+    </div></div>`;
+
+  const listEl = document.getElementById("sessList");
+  function draw(filter) {
+    const f = (filter || "").trim().toLowerCase();
+    const rows = sessions.filter(s => !f ||
+      (s.project_name || "").toLowerCase().includes(f) ||
+      (s.title || "").toLowerCase().includes(f) ||
+      (s.project || "").toLowerCase().includes(f));
+    if (!rows.length) {
+      listEl.innerHTML = `<div class="list-empty">일치하는 세션이 없습니다.</div>`;
+      return;
+    }
+    listEl.innerHTML = rows.map(s => `
+      <div class="sess-row" data-id="${esc(s.id)}" role="link" tabindex="0">
+        <span class="d">${esc(fmtDT(s.last_ts))}</span>
+        <span class="p"><span class="pchip">${esc(s.project_name || s.project || "?")}</span></span>
+        <span class="t">${esc(s.title || "(제목 없음)")}</span>
+        <span class="m"><span>👤 <b>${s.user_msgs ?? 0}</b></span><span>🤖 <b>${s.assistant_msgs ?? 0}</b></span><span>sub <b>${s.subagents ?? 0}</b></span></span>
+      </div>`).join("");
+    listEl.querySelectorAll(".sess-row").forEach(el => {
+      const go = () => { location.hash = "#/session/" + encodeURIComponent(el.dataset.id); };
+      el.addEventListener("click", go);
+      el.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+    });
+  }
+  draw("");
+  document.getElementById("listFilter").addEventListener("input", e => draw(e.target.value));
+}
+
+/* ============================================================================
+   Route: #/search
+   ============================================================================ */
+
+async function viewSearch() {
+  const st = appState.searchState;
+  $view.innerHTML = `
+    <div class="page"><div class="page-inner">
+      <h1>검색</h1>
+      <div class="sub">세션 전문 검색 — 키워드 + 시맨틱(Ollama 임베딩)</div>
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="검색어… (Enter로 검색)" value="${esc(st.q)}" autocomplete="off">
+        <input type="text" id="proj" list="projList" placeholder="프로젝트 필터" value="${esc(st.project)}" style="width:170px">
+        <datalist id="projList"></datalist>
+        <label class="sem-toggle"><input type="checkbox" id="sem" ${st.semantic ? "checked" : ""}> 시맨틱 검색</label>
+        <button class="btn primary" id="goBtn">검색</button>
+      </div>
+      <div class="search-note" id="searchNote"></div>
+      <div id="results"></div>
+    </div></div>`;
+
+  // project datalist from session cache (best-effort)
+  (async () => {
+    try {
+      const data = appState.sessionsCache ? { sessions: appState.sessionsCache } : await api.sessions();
+      appState.sessionsCache = data.sessions || [];
+      const names = [...new Set(appState.sessionsCache.map(s => s.project_name || s.project).filter(Boolean))];
+      document.getElementById("projList").innerHTML = names.map(n => `<option value="${esc(n)}">`).join("");
+    } catch (e) { /* datalist is optional */ }
+  })();
+
+  const qEl = document.getElementById("q"), semEl = document.getElementById("sem"), projEl = document.getElementById("proj");
+  const resEl = document.getElementById("results"), noteEl = document.getElementById("searchNote");
+
+  async function run() {
+    st.q = qEl.value.trim(); st.semantic = semEl.checked; st.project = projEl.value.trim();
+    if (!st.q) { resEl.innerHTML = ""; noteEl.innerHTML = ""; return; }
+    resEl.innerHTML = `<div class="load" style="padding:20px 4px"><span class="spin"></span>검색 중…</div>`;
+    noteEl.innerHTML = "";
+    let data;
+    try {
+      data = await api.search(st.q, st.semantic, st.project);
+    } catch (err) {
+      resEl.innerHTML = "";
+      noteEl.innerHTML = `<span class="warn">⚠ ${esc(err.message)}</span>` +
+        (err.detail ? ` <span>${esc(err.detail)}</span>` : "");
+      return;
+    }
+    const hits = data.hits || [];
+    const notes = [];
+    if (data.scan_total != null) notes.push(`스캔한 세션 ${data.scan_total}개 · 결과 ${hits.length}건`);
+    if (data.semantic_note) notes.push(`<span class="warn">⚠ ${esc(data.semantic_note)}</span>`);
+    noteEl.innerHTML = notes.join(" · ");
+    if (!hits.length) {
+      resEl.innerHTML = `<div class="list-empty" style="border:1px solid var(--border-soft); border-radius:10px">결과가 없습니다.</div>`;
+      return;
+    }
+    resEl.innerHTML = hits.map(h => {
+      const snippet = esc(h.snippet || "").replace(/\[([^\[\]]{1,120}?)\]/g, "<mark>$1</mark>");
+      return `
+      <button class="hit" data-id="${esc(h.session_id)}">
+        <span class="hd">
+          <span class="kind ${h.kind === "subagent" ? "subagent" : "main"}">${h.kind === "subagent" ? "SUBAGENT" : "MAIN"}</span>
+          <span class="title">${esc(h.title || "(제목 없음)")}</span>
+          <span class="proj">${esc(h.project || "")}</span>
+          <span class="ts">${esc(fmtDT(h.ts))}</span>
+        </span>
+        <span class="snippet"><span class="role-tag">${h.role === "user" ? "사용자" : "Claude"}</span>${snippet}</span>
+      </button>`;
+    }).join("");
+    resEl.querySelectorAll(".hit").forEach(el =>
+      el.addEventListener("click", () => { location.hash = "#/session/" + encodeURIComponent(el.dataset.id); }));
+  }
+
+  document.getElementById("goBtn").addEventListener("click", run);
+  qEl.addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+  if (st.q) run(); else qEl.focus();
+}
+
+/* ============================================================================
+   Route: #/session/<id> — reading-first conversation viewer
+   ============================================================================ */
+
+async function viewSession(id) {
+  renderLoading("세션 불러오는 중…");
+  let data;
+  try {
+    data = await api.session(id);
+  } catch (err) {
+    renderError(err, { offerDemo: !appState.demo, backHash: "#/" });
+    return;
+  }
+  try {
+    new SessionViewer($view, id, data);
+  } catch (err) {
+    renderError({ message: "세션 트리를 구성하지 못했습니다.", detail: String(err && err.stack || err) }, { backHash: "#/" });
+  }
+}
+
+/* ---------------- message tree ---------------- */
+
+function buildTree(links, messages) {
+  const nodes = new Map();
+  (links || []).forEach(l => {
+    const m = (messages || {})[l.uuid];
+    nodes.set(l.uuid, {
+      uuid: l.uuid, parentUuid: l.parent_uuid || null,
+      line: l.line_no ?? 0, role: l.role || (m && m.role) || "assistant",
+      hasContent: !!(l.has_content && m),
+      kind: m ? (m.kind === "thinking" ? "thinking" : m.kind === "tool" ? "tool" : "text") : "text", // kind 없으면 text
+      ts: m ? m.ts : null, content: m ? m.content : null,
+      children: [],
+    });
+  });
+  const roots = [];
+  nodes.forEach(n => {
+    if (n.parentUuid && nodes.has(n.parentUuid)) nodes.get(n.parentUuid).children.push(n);
+    else roots.push(n); // parent 없음/유실 → root 취급 (defensive)
+  });
+  nodes.forEach(n => n.children.sort((a, b) => a.line - b.line));
+  roots.sort((a, b) => a.line - b.line);
+
+  let root;
+  if (roots.length === 1) root = roots[0];
+  else {
+    root = { uuid: "__virtual_root", virtual: true, line: -1, role: "assistant", hasContent: false, kind: "text", ts: null, content: null, children: roots };
+  }
+  // 각 노드의 서브트리 최대 line_no (main branch 판정용) — iterative post-order
+  const order = [];
+  const stack = [root];
+  while (stack.length) { const n = stack.pop(); order.push(n); for (const c of n.children) stack.push(c); }
+  for (let i = order.length - 1; i >= 0; i--) {
+    const n = order[i];
+    n.maxLine = n.line;
+    for (const c of n.children) if (c.maxLine > n.maxLine) n.maxLine = c.maxLine;
+  }
+  return { root, nodes };
+}
+
+function isTextMsg(n) { return n.hasContent && n.kind === "text"; }
+
+function subtreeStats(rootNode) {
+  let nodeCount = 0, textCount = 0, thinkCount = 0, maxDepth = 0, forksInside = 0;
+  let minTs = null, maxTs = null, firstText = null, firstContent = null;
+  const stack = [[rootNode, 1]];
+  while (stack.length) {
+    const [n, d] = stack.pop();
+    nodeCount++;
+    if (d > maxDepth) maxDepth = d;
+    if (n.children.length > 1) forksInside++;
+    if (n.hasContent) {
+      if (n.kind === "thinking") thinkCount++; else if (n.kind === "text") textCount++;
+      if (!firstContent || n.line < firstContent.line) firstContent = n;
+      if (isTextMsg(n) && (!firstText || n.line < firstText.line)) firstText = n;
+      if (n.ts) {
+        const t = Date.parse(n.ts);
+        if (!isNaN(t)) {
+          if (minTs == null || t < minTs) minTs = t;
+          if (maxTs == null || t > maxTs) maxTs = t;
+        }
+      }
+    }
+    for (const c of n.children) stack.push([c, d + 1]);
+  }
+  return { nodeCount, textCount, thinkCount, maxDepth, forksInside,
+    firstContent: firstText || firstContent,
+    durMs: (minTs != null && maxTs != null) ? maxTs - minTs : null, minTs, maxTs };
+}
+
+/* ---------------- SessionViewer ---------------- */
+
+class SessionViewer {
+  constructor(container, id, data) {
+    this.id = id;
+    this.meta = data.meta || {};
+    const t = buildTree(data.links, data.messages);
+    this.root = t.root; this.nodes = t.nodes;
+    this.selections = {};       // forkUuid → chosen child uuid
+    this.colorMap = new Map();  // branch subtree root uuid → color
+    this.colorNext = 0;
+
+    this.forkList = [];
+    this.nodes.forEach(n => { if (n.children.length > 1) this.forkList.push(n); });
+    if (this.root.virtual && this.root.children.length > 1) this.forkList.push(this.root);
+    this.forkList.sort((a, b) => a.line - b.line);
+    this.branchTotal = this.forkList.reduce((s, f) => s + f.children.length - 1, 0);
+    this.hasForks = this.branchTotal > 0;
+
+    this.buildLayout(container);
+    this.render();
+  }
+
+  branchColor(uuid) {
+    if (!this.colorMap.has(uuid)) {
+      this.colorMap.set(uuid, this.colorNext < FORK_COLORS.length ? FORK_COLORS[this.colorNext++] : OVERFLOW_COLOR);
+    }
+    return this.colorMap.get(uuid);
+  }
+  forkName(fork) {
+    const i = this.forkList.indexOf(fork);
+    return "Fork " + String.fromCharCode(65 + (i < 0 ? 0 : i % 26));
+  }
+  selectedChild(fork) {
+    const id = this.selections[fork.uuid];
+    const c = id && fork.children.find(x => x.uuid === id);
+    if (c) return c;
+    // 기본 main: 서브트리에 가장 높은 line_no를 가진 자식
+    return fork.children.reduce((a, b) => (b.maxLine > a.maxLine ? b : a), fork.children[0]);
+  }
+  computeMainPath() {
+    const path = [];
+    let cur = this.root;
+    while (cur) {
+      if (!cur.virtual) path.push(cur);
+      if (!cur.children.length) break;
+      cur = cur.children.length > 1 ? this.selectedChild(cur) : cur.children[0];
+    }
+    return path;
+  }
+
+  /* ----- static layout ----- */
+  buildLayout(container) {
+    const m = this.meta;
+    const resumeCmd = `claude --resume ${this.id}`;
+    container.innerHTML = `
+      <div class="session-view${this.hasForks ? " has-forks" : ""}">
+        <div class="subhdr">
+          <a class="back" href="#/">←</a>
+          <span class="stitle" title="${esc(m.title || "")}">${esc(m.title || "(제목 없음)")}</span>
+          <span class="chip">${esc(m.project_name || m.project || "?")}</span>
+          ${m.git_branch ? `<span class="chip">⎇ ${esc(m.git_branch)}</span>` : ""}
+          <span class="dates">${esc(fmtDT(m.first_ts))} → ${esc(fmtDT(m.last_ts))}</span>
+          <div class="spacer"></div>
+          <span class="resume-cmd" title="${esc(resumeCmd)}">
+            <span class="cmdtext">${esc(resumeCmd)}</span>
+            <button id="copyResume">복사</button>
+          </span>
+          <div class="stat-badge" id="svBadge"></div>
+        </div>
+        <div class="app">
+          <div class="scroller" id="svScroller">
+            <div class="thread-wrap" id="svWrap">
+              <div class="thread" id="svThread"></div>
+              ${this.hasForks ? `<div class="branch-rail" id="svRail" aria-label="abandoned branches"></div>` : ""}
+            </div>
+          </div>
+          <div class="minimap" id="svMinimap" title="클릭 또는 드래그로 이동"><div class="mm-layer" id="svMmLayer"></div></div>
+        </div>
+      </div>`;
+
+    this.scroller = container.querySelector("#svScroller");
+    this.wrapEl = container.querySelector("#svWrap");
+    this.thread = container.querySelector("#svThread");
+    this.railEl = container.querySelector("#svRail");
+    this.mmLayer = container.querySelector("#svMmLayer");
+    const minimap = container.querySelector("#svMinimap");
+
+    container.querySelector("#copyResume").addEventListener("click", () => {
+      copyText(resumeCmd).then(() => showToast(`<code>${esc(resumeCmd)}</code> 를 복사했습니다.`));
+    });
+
+    let ticking = false;
+    this.scroller.addEventListener("scroll", () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => { this.updateViewport(); ticking = false; });
+    });
+    this._onResize = () => requestAnimationFrame(() => this.reflow()); // 카드 위치 + 미니맵 재계산
+    window.addEventListener("resize", this._onResize);
+
+    const mapScroll = clientY => {
+      const rect = this.mmLayer.getBoundingClientRect();
+      const scale = this.mmLayer.clientHeight / this.scroller.scrollHeight;
+      this.scroller.scrollTop = (clientY - rect.top) / scale - this.scroller.clientHeight / 2;
+    };
+    minimap.addEventListener("pointerdown", e => {
+      minimap.setPointerCapture(e.pointerId);
+      mapScroll(e.clientY);
+      const move = ev => mapScroll(ev.clientY);
+      const up = () => { minimap.removeEventListener("pointermove", move); minimap.removeEventListener("pointerup", up); };
+      minimap.addEventListener("pointermove", move);
+      minimap.addEventListener("pointerup", up);
+    });
+  }
+
+  /* ----- main render ----- */
+  render() {
+    const path = this.computeMainPath();
+    this.mainPath = path;
+    this.thread.innerHTML = "";
+    if (this.railEl) this.railEl.innerHTML = "";
+    this.railItems = [];          // [{card, row, forkUuid}] — 오른쪽 여백의 분기 카드
+    this.forkAnchors = new Map(); // fork.uuid → anchor msg-row element
+    this._openInline = null;      // (narrow fallback) 인라인 분기 확장은 한 번에 하나만
+
+    const intro = document.createElement("div");
+    intro.className = "thread-intro";
+    intro.innerHTML = `<b>episodic memory</b> · ` + (this.hasForks
+      ? `main branch를 처음부터 끝까지 표시합니다 — abandoned branch는 오른쪽 여백 카드에서 바로 확인하고 전환할 수 있습니다.`
+      : `이 세션에는 분기가 없습니다 (선형 대화).`);
+    this.thread.appendChild(intro);
+
+    let contentIdx = 0;
+    let toolNodes = [];       // 연속된 tool step 노드 (kind:"tool" 또는 content 없는 링크)
+    let pendingThink = [];    // 다음 Claude 텍스트 버블 위에 붙일 thinking 노드들
+    let lastRow = null;       // 마지막으로 렌더된 메시지 버블 row
+    let pendingForks = [];    // 아직 앞에 버블이 없어 첫 버블을 기다리는 fork들
+    const rowForks = [];      // [{row, fork, isStart}] — 대화 흐름을 끊지 않는 per-message 분기 앵커
+    const anchorFork = (fork, isStart) => {
+      if (lastRow) rowForks.push({ row: lastRow, fork, isStart: !!isStart });
+      else pendingForks.push({ fork, isStart: !!isStart });
+    };
+    const flushTools = () => {
+      if (!toolNodes.length) return;
+      this.thread.appendChild(this.buildToolBlock(toolNodes));
+      toolNodes = [];
+    };
+    const flushThink = () => {
+      if (!pendingThink.length) return;
+      this.thread.appendChild(this.buildThinkBlock(pendingThink));
+      pendingThink = [];
+    };
+
+    // 세션 시작점 분기(virtual root) → main path의 첫 메시지에 부착
+    if (this.root.virtual && this.root.children.length > 1) anchorFork(this.root, true);
+
+    path.forEach(node => {
+      const isFork = node.children.length > 1;
+      if (!node.hasContent || node.kind === "tool") {
+        toolNodes.push(node); // 연속 tool step은 하나의 아코디언으로
+        if (isFork) anchorFork(node); // 직전 버블에 부착 (흐름은 끊지 않음)
+        return;
+      }
+      if (node.kind === "thinking") {
+        pendingThink.push(node); // 연속 thinking은 하나의 아코디언으로 병합
+        if (isFork) anchorFork(node);
+        return;
+      }
+      flushTools();
+      contentIdx++;
+      flushThink(); // Claude 텍스트 버블 바로 위(사용자 버블이면 standalone)
+      const row = this.buildMsgRow(node, contentIdx);
+      this.thread.appendChild(row);
+      lastRow = row;
+      if (pendingForks.length) {
+        pendingForks.forEach(p => rowForks.push({ row, fork: p.fork, isStart: p.isStart }));
+        pendingForks = [];
+      }
+      if (isFork) anchorFork(node); // 자기 자신의 버블에 부착
+    });
+    flushTools();
+    flushThink(); // 뒤에 텍스트가 없으면 standalone
+
+    // row별로 fork를 묶어 여백 카드 + 앵커 마커(+ narrow fallback 칩) 부착
+    const byRow = new Map();
+    rowForks.forEach(({ row, fork, isStart }) => {
+      if (!byRow.has(row)) byRow.set(row, []);
+      byRow.get(row).push({ fork, isStart });
+      this.forkAnchors.set(fork.uuid, row);
+    });
+    byRow.forEach((forks, row) => this.attachForkAffordance(row, forks));
+
+    requestAnimationFrame(() => this.reflow());
+    this.updateBadge(path);
+  }
+
+  /* 카드 위치 + 미니맵 재계산 (레이아웃 변화 후 항상 호출) */
+  reflow() {
+    this.positionRailCards();
+    this.renderMinimap();
+  }
+
+  /* 오른쪽 여백 카드: 앵커 row의 offsetTop에 정렬, 겹치면 아래로 밀어냄 */
+  positionRailCards() {
+    if (!this.railEl || !this.railItems || this.railEl.offsetParent === null) return; // narrow: rail 숨김
+    let lastBottom = 0;
+    this.railItems.forEach(({ card, row }) => {
+      let top = row.offsetTop;
+      if (lastBottom && top < lastBottom + 10) top = lastBottom + 10;
+      card.style.top = top + "px";
+      lastBottom = top + card.offsetHeight;
+    });
+    // 마지막 카드가 스레드보다 길게 내려가면 스크롤 영역 확보
+    this.wrapEl.style.minHeight = lastBottom ? (lastBottom + 60) + "px" : "";
+  }
+
+  buildMsgRow(node, idx) {
+    const row = document.createElement("div");
+    const isUser = node.role === "user";
+    row.className = `msg-row ${isUser ? "user" : "asst"}`;
+    row.dataset.msgId = node.uuid;
+    row.dataset.idx = idx;
+    const bodyHtml = isUser ? esc(node.content || "") : renderRich(node.content || "");
+    row.innerHTML = `
+      <div class="bubble">
+        <div class="body">${bodyHtml}</div>
+        <div class="msg-meta">${isUser ? "사용자" : "Claude"} · #${idx}${node.ts ? " · " + esc(fmtTime(node.ts)) : ""}</div>
+      </div>`;
+    return row;
+  }
+
+  /* thinking 아코디언 — 항상 접힌 상태로 시작 */
+  buildThinkBlock(nodes) {
+    const totalChars = nodes.reduce((s, n) => s + String(n.content || "").length, 0);
+    const wrap = document.createElement("div");
+    wrap.className = "think";
+    wrap.dataset.thinkId = nodes[0].uuid;
+    const bodyHtml = nodes.map(n => esc(n.content || "")).join('<span class="think-sep"></span>');
+    wrap.innerHTML = `
+      <button class="think-toggle" aria-expanded="false">🧠 사고 과정 · ${totalChars.toLocaleString("ko-KR")}자 <span class="chev">▸</span></button>
+      <div class="think-body">${bodyHtml}</div>`;
+    const btn = wrap.querySelector(".think-toggle");
+    btn.addEventListener("click", () => {
+      const open = wrap.classList.toggle("open");
+      btn.setAttribute("aria-expanded", String(open));
+      requestAnimationFrame(() => this.reflow());
+    });
+    return wrap;
+  }
+
+  /* tool step 아코디언 — thinking과 같은 시각 언어, 항상 접힌 상태로 시작.
+     kind:"tool" (요약 content 있음) + 구형 content 없는 링크를 하나의 그룹으로 묶는다. */
+  buildToolBlock(nodes) {
+    const n = nodes.length;
+    const wrap = document.createElement("div");
+    wrap.className = "steps";
+    wrap.dataset.stepId = nodes[0].uuid;
+    const items = nodes.map(nd => {
+      const has = nd.hasContent && nd.kind === "tool";
+      return `<div class="step${has ? "" : " empty"}"><span class="g">${has ? "⚙" : "·"}</span><span class="step-txt">${has ? esc(nd.content) : "(내용 없음)"}</span></div>`;
+    }).join("");
+    wrap.innerHTML = `
+      <button class="steps-toggle" aria-expanded="false">🔧 ${n} tool step${n > 1 ? "s" : ""} <span class="chev">▸</span></button>
+      <div class="steps-body">${items}</div>`;
+    const btn = wrap.querySelector(".steps-toggle");
+    btn.addEventListener("click", () => {
+      const open = wrap.classList.toggle("open");
+      btn.setAttribute("aria-expanded", String(open));
+      requestAnimationFrame(() => this.reflow());
+    });
+    return wrap;
+  }
+
+  /* fork 앵커 메시지: 여백 카드(항상 표시) + 모서리 dot 마커, narrow에서는 칩 + 인라인 확장 fallback */
+  attachForkAffordance(row, forks) {
+    const entries = [];
+    forks.forEach(({ fork, isStart }) => {
+      const sel = this.selectedChild(fork);
+      const alts = fork.children.filter(c => c !== sel);
+      alts.forEach((alt, k) => entries.push({
+        fork, isStart, alt, ord: k, sibN: alts.length,
+        st: subtreeStats(alt), color: this.branchColor(alt.uuid),
+      }));
+    });
+    if (!entries.length) return;
+    const n = entries.length;
+    const color = entries[0].color;
+    const isStart = forks.some(f => f.isStart);
+    const idx = +row.dataset.idx || 0;
+    const label = isStart ? "시작점 분기" : `다른 분기 ${n}개`;
+
+    row.classList.add("has-fork");
+    row._forkColor = color;
+
+    // (wide) 앵커 버블 모서리의 연상용 색 dot — 클릭 없이 카드와 짝을 맞춘다
+    const dot = document.createElement("span");
+    dot.className = "fork-dot";
+    dot.style.background = color;
+    dot.title = label;
+    row.querySelector(".bubble").appendChild(dot);
+
+    // (wide) 오른쪽 여백에 항상 보이는 분기 카드 — 앵커 row 높이에 정렬 (positionRailCards)
+    if (this.railEl) {
+      entries.forEach(({ fork, isStart: entStart, alt, ord, sibN, st, color: c }) => {
+        const first = st.firstContent;
+        const quote = first ? esc((first.content || "").slice(0, 200)) : "<i>(tool step만 포함)</i>";
+        const card = document.createElement("div");
+        card.className = "rc-card";
+        card.style.borderLeftColor = c;
+        card.innerHTML = `
+          <span class="rc-conn" style="background:${c}"></span>
+          <div class="rc-head">
+            <span class="rc-name" style="color:${c}">⑂ ${this.forkName(fork)}${sibN > 1 ? "-" + (ord + 1) : ""} · abandoned</span>
+            <span class="rc-time">${entStart ? "시작점 분기" : `#${idx}에서 분기`}${first && first.ts ? " · " + esc(fmtTime(first.ts)) : ""}</span>
+          </div>
+          <div class="rc-quote">${first ? `<span class="q-role">${first.role === "user" ? "사용자" : "Claude"}</span>` : ""}${quote}</div>
+          <div class="rc-stats">
+            <span>msgs <b>${st.textCount}</b></span>
+            <span>깊이 <b>${st.maxDepth}</b></span>
+            ${st.durMs != null ? `<span>소요 <b>${fmtDurMs(st.durMs)}</b></span>` : ""}
+            ${st.forksInside ? `<span>분기 <b>${st.forksInside}</b></span>` : ""}
+          </div>
+          <button class="switch-btn" style="background:${c}">이 분기로 전환 →</button>`;
+        card.querySelector(".switch-btn").addEventListener("click", () => this.switchToBranch(fork, alt));
+        this.railEl.appendChild(card);
+        this.railItems.push({ card, row, forkUuid: fork.uuid });
+      });
+    }
+
+    // (narrow fallback) 모서리 칩 + 인라인 확장
+    const chip = document.createElement("button");
+    chip.className = "fork-chip";
+    chip.setAttribute("aria-expanded", "false");
+    chip.title = label;
+    chip.style.borderColor = color + "88";
+    chip.style.color = color;
+    chip.innerHTML = `⑂ <b>${n}</b><span class="fc-label">${esc(label)}</span>`;
+    row.querySelector(".bubble").appendChild(chip);
+
+    const inline = document.createElement("div");
+    inline.className = "fork-inline" + (row.classList.contains("user") ? " from-user" : "");
+    entries.forEach(({ fork, isStart: entStart, alt, ord, sibN, st, color }) => {
+      const first = st.firstContent;
+      const quote = first ? esc((first.content || "").slice(0, 240)) : "<i>(내용 있는 메시지 없음 — tool step만 포함)</i>";
+      const nested = st.forksInside ? ` · 분기 ${st.forksInside}개 포함` : "";
+      const toolN = st.nodeCount - st.textCount - st.thinkCount;
+      const el = document.createElement("div");
+      el.className = "pv-alt";
+      el.style.borderLeftColor = color;
+      el.innerHTML = `
+        <div class="pv-head">
+          <span class="pv-name" style="color:${color}">${this.forkName(fork)}${sibN > 1 ? "-" + (ord + 1) : ""} — abandoned branch</span>
+          <span class="pv-time">${first && first.ts ? esc(fmtTime(first.ts)) + " 분기" : ""}${st.durMs != null ? ` · ${fmtDurMs(st.durMs)} 진행 후 중단` : ""}</span>
+        </div>
+        <div class="pv-quote">${first ? `<span class="q-role">${first.role === "user" ? "사용자" : "Claude"}</span>` : ""}${quote}</div>
+        <div class="pv-stats">
+          <span class="pv-stat">메시지 <b>${st.textCount}</b>개</span>
+          ${toolN ? `<span class="pv-stat">tool step <b>${toolN}</b></span>` : ""}
+          <span class="pv-stat">깊이 <b>${st.maxDepth}</b></span>
+          ${st.durMs != null ? `<span class="pv-stat">소요 <b>${fmtDurMs(st.durMs)}</b></span>` : ""}
+          <span class="pv-stat">${entStart ? "세션 시작점에서 분기" : `#${idx} 메시지에서 분기`}${nested}</span>
+        </div>
+        <button class="switch-btn" style="background:${color}">이 분기로 전환 →</button>
+        <span class="pv-hint">현재 main은 분기 기록으로 보관됩니다</span>`;
+      el.querySelector(".switch-btn").addEventListener("click", () => this.switchToBranch(fork, alt));
+      inline.appendChild(el);
+    });
+    row.insertAdjacentElement("afterend", inline);
+
+    const setOpen = open => {
+      if (open && this._openInline && this._openInline !== inline) {
+        this._openInline.classList.remove("open");
+        if (this._openInline._chip) this._openInline._chip.setAttribute("aria-expanded", "false");
+        this._openInline = null;
+      }
+      inline.classList.toggle("open", open);
+      chip.setAttribute("aria-expanded", String(open));
+      if (open) this._openInline = inline;
+      else if (this._openInline === inline) this._openInline = null;
+      requestAnimationFrame(() => this.reflow());
+    };
+    inline._chip = chip;
+    row._openFork = () => setOpen(true);
+    chip.addEventListener("click", () => setOpen(!inline.classList.contains("open")));
+  }
+
+  switchToBranch(fork, altRoot) {
+    this.selections[fork.uuid] = altRoot.uuid;
+    this.render();
+    this.thread.classList.remove("fading"); void this.thread.offsetWidth; this.thread.classList.add("fading");
+    requestAnimationFrame(() => {
+      const el = this.forkAnchors.get(fork.uuid);
+      if (el) {
+        this.scroller.scrollTo({ top: Math.max(0, el.offsetTop - this.scroller.clientHeight * 0.25), behavior: "smooth" });
+        const chip = el.querySelector(".fork-chip"); // narrow fallback
+        if (chip) { chip.classList.add("flash"); setTimeout(() => chip.classList.remove("flash"), 1500); }
+      }
+      // 여백 카드 플래시 (wide)
+      (this.railItems || []).filter(it => it.forkUuid === fork.uuid).forEach(({ card }) => {
+        card.classList.add("flash"); setTimeout(() => card.classList.remove("flash"), 1500);
+      });
+    });
+    const c = this.branchColor(altRoot.uuid);
+    showToast(`<span class="tdot" style="background:${c}"></span>${this.forkName(fork)}의 분기로 전환했습니다 — 이전 main은 분기 기록에 보관됩니다.`);
+  }
+
+  updateBadge(path) {
+    const contentN = path.filter(isTextMsg).length;
+    const el = document.getElementById("svBadge");
+    if (el) el.innerHTML = `<span class="dot"></span><span>main branch: <b>${contentN} msgs</b>${this.hasForks ? ` · 분기 <b>${this.branchTotal}</b>개` : " · 분기 없음"}</span>`;
+  }
+
+  /* ----- minimap (simplified) ----- */
+  renderMinimap() {
+    const layerH = this.mmLayer.clientHeight;
+    const total = this.scroller.scrollHeight;
+    if (!total || !layerH) return;
+    const scale = layerH / total;
+    this.mmLayer.innerHTML = "";
+
+    this.thread.querySelectorAll(".msg-row, .steps").forEach(row => {
+      const bar = document.createElement("div");
+      const isTool = row.classList.contains("steps");
+      const isUser = row.classList.contains("user");
+      bar.className = "mm-bar " + (isTool ? "t" : isUser ? "u" : "a");
+      const top = row.offsetTop * scale;
+      const h = Math.max(isTool ? 1 : 1.5, (row.offsetHeight - 14) * scale);
+      bar.style.cssText = `top:${top}px; height:${h}px;`;
+      this.mmLayer.appendChild(bar);
+    });
+
+    const seen = new Set();
+    (this.forkAnchors || new Map()).forEach(row => {
+      if (seen.has(row)) return;
+      seen.add(row);
+      const tick = document.createElement("div");
+      tick.className = "mm-fork";
+      tick.style.cssText = `top:${(row.offsetTop + 4) * scale}px; background:${row._forkColor || "var(--main)"};`;
+      this.mmLayer.appendChild(tick);
+    });
+
+    this.updateViewport(scale);
+  }
+  updateViewport(scale) {
+    scale = scale || (this.mmLayer.clientHeight / this.scroller.scrollHeight);
+    let vp = this.mmLayer.querySelector(".mm-viewport");
+    if (!vp) { vp = document.createElement("div"); vp.className = "mm-viewport"; this.mmLayer.appendChild(vp); }
+    vp.style.top = (this.scroller.scrollTop * scale) + "px";
+    vp.style.height = Math.max(18, this.scroller.clientHeight * scale) + "px";
+  }
+}
+
+/* ============================================================================
+   Demo data (server가 없을 때 명시적으로 선택하는 fallback)
+   ============================================================================ */
+
+const DEMO = (() => {
+  const DAY = "2026-08-06T";
+  const iso = (hm, sec) => `${DAY}${hm}:${pad(sec || 0)}.000Z`;
+
+  // (id, role, hh:mm, content, nToolStepsBefore, kind?)
+  const main = [
+    ["m0","user","14:02","session-brain 인덱서가 큰 세션에서 panic 나. cargo run -- index ~/.claude/projects 하면 `called Option::unwrap() on a None value` — parser.rs:214 근처인 것 같아.",0],
+    ["m1","assistant","14:04","재현해 보겠습니다. 먼저 backtrace로 정확한 위치를 확인할게요.\n\n```\n$ RUST_BACKTRACE=1 cargo run -- index ~/.claude/projects\n```",2],
+    ["m1t","assistant","14:06","panic 위치가 parser.rs:214이면 rec.parent_uuid.unwrap() 쪽이다. Claude Code 세션 JSONL에는 summary 타입 레코드가 있고, 이 레코드에는 parentUuid 필드가 아예 없다. 필드 누락이 serde 단계에서 에러가 되지 않고 unwrap에서 터지는 구조일 가능성이 높다. Option<Uuid> + serde(default)로 받는 수정을 제안하자.",0,"thinking"],
+    ["m2","assistant","14:07","원인 확인했습니다. `parentUuid`가 아예 없는 레코드에서 unwrap하고 있습니다. **summary 타입 레코드**는 parentUuid 필드 자체가 없어요.\n\n```rust\n// parser.rs:214\nlet parent = rec.parent_uuid.unwrap(); // ← summary 레코드는 None\n```",0],
+    ["m3","user","14:09","그럼 summary 레코드는 어떻게 처리하는 게 맞아? 그냥 스킵해도 돼?",0],
+    ["m4","assistant","14:11","스킵은 권하지 않습니다 — summary는 세션 제목 복원에 쓰입니다. `Option<Uuid>`로 받아서 parent 없는 레코드를 root 노드로 취급하는 방식을 제안합니다.",0],
+    ["m5","user","14:18","좋아, 그 방식으로 parser 고쳐줘. Option<Uuid> + root 취급. 회귀 테스트도 같이 넣어줘.",0],
+    ["m6","assistant","14:22","parser.rs 수정 완료. `parent_uuid`를 serde default가 있는 **Option**으로 바꾸고 테스트 3개 추가했습니다.\n\n```rust\n#[derive(Deserialize)]\nstruct Record {\n    uuid: Uuid,\n    #[serde(default, rename = \"parentUuid\")]\n    parent_uuid: Option<Uuid>,   // summary / root → None\n    timestamp: DateTime<Utc>,\n}\n```",3],
+    ["m7","user","14:24","cargo test 돌려봐.",0],
+    ["m8","assistant","14:26","**12 passed, 0 failed.** 다만 test_branch_detection이 타이밍에 민감해 보여서 추후 fixture 고정이 필요할 수 있습니다.",2],
+    ["m9","user","14:29","이제 성능. 인덱싱이 너무 느려 — 1.2GB 세션 로그에 4분 넘게 걸려. 프로파일 해봐.",0],
+    ["m10t1","assistant","14:31","flamegraph에서 라인 단위 serde_json::from_str가 지배적이라면 선택지는 (1) simd-json 도입 (2) 파일 단위 병렬화 (3) 라인 프리필터 세 가지다.",0,"thinking"],
+    ["m10t2","assistant","14:32","simd-json은 unsafe 의존이 늘고 이득이 불확실하다. 라인 프리필터는 파싱 자체를 줄이지 못한다. 파일 단위 병렬화가 가장 안전하고 효과가 크다. 사용자에게 두 가지 현실적인 옵션으로 정리해 제시하자.",0,"thinking"],
+    ["m10","assistant","14:33","flamegraph 결과 **71%**가 라인 단위 `serde_json::from_str`에 몰려 있습니다. 옵션은 두 가지: simd-json 도입, 또는 파일 단위 병렬화.",2],
+    ["m11","user","14:36","병렬화가 안전할까? 같은 세션 안에서는 메시지 순서 보장이 필요하잖아.",0],
+    ["m12","assistant","14:39","파일 단위 병렬화면 안전합니다. 파일 내부는 순차 파싱을 유지하고, 파일 간에만 rayon `par_iter`를 쓰면 됩니다. tantivy IndexWriter 쓰기만 mutex로 직렬화하면 순서 문제가 없습니다.",0],
+    ["m13","user","15:14","좋아, rayon으로 가자. 파일 단위 par_iter 구현해줘.",0],
+    ["m14","assistant","15:19","구현 완료했습니다. indexer.rs 핵심부:\n\n```rust\nfiles.par_iter().try_for_each(|f| {\n    let docs = parse_session(f)?;      // 파일 내부는 순차\n    writer.lock().add_documents(docs)  // 쓰기만 직렬화\n})\n```",2],
+    ["m15","user","15:21","벤치마크 결과는?",0],
+    ["m16","assistant","15:23","1.2GB 기준 **4m02s → 41s**, 약 5.9배 향상입니다 (8코어). writer lock 경합은 2% 미만이라 병목 아닙니다.",1],
+    ["m17","user","15:26","굿. 이제 브랜치 감지 로직 보자. 같은 parentUuid에 자식이 여러 개 달리면 그게 분기인 거지?",0],
+    ["m18","assistant","15:29","맞습니다. children이 2개 이상인 노드가 fork point입니다. main branch는 가장 최신 라인까지 이어진 leaf까지의 경로로 정의했고, 나머지 서브트리는 abandoned로 분류합니다.",0],
+    ["m19","user","15:43","abandoned branch도 전부 인덱싱하되 branch_status 필드로 태깅하고 기본 검색에선 필터링하자. tantivy 스키마 잡아줘.",0],
+    ["m20","assistant","15:47","스키마 확장했습니다. 기본 쿼리에는 `branch_status:main` 필터가 붙고, `include:abandoned`일 때만 전체 노출됩니다.\n\n```rust\nschema.add_text_field(\"content\", TEXT | STORED);\nschema.add_text_field(\"branch_status\", STRING | FAST); // main | abandoned\nschema.add_u64_field(\"fork_depth\", INDEXED | STORED);\n```",0],
+    ["m21","user","15:50","커밋 전에 clippy랑 fmt 돌려줘.",0],
+    ["m22","assistant","15:52","clippy 경고 2개 수정했습니다 (needless_collect, redundant_clone). fmt 완료, diff 없음.",2],
+    ["m23","user","15:54","커밋 메시지 써서 커밋해줘.",0],
+    ["m24","assistant","15:57","커밋 완료: `feat(indexer): parallel file indexing + branch-aware schema` (a3f92c1). 4 files changed, +218 −64.",1],
+  ];
+  const brA = [
+    ["a0","user","14:13","그냥 unwrap()을 expect(\"parentUuid missing\")로 바꿔서 에러 메시지만 보기 좋게 해줘.",0],
+    ["a1","assistant","14:15","그렇게 하면 메시지는 친절해지지만 panic 자체는 그대로 발생합니다. summary 레코드는 정상 데이터이므로 Option으로 받는 근본 수정을 권합니다. 그래도 진행할까요?",0],
+  ];
+  const brB = [
+    ["b0","user","14:41","잠깐, 이참에 인덱서 전체를 tokio 기반 async로 재작성하는 건 어때? 나중에 watch 모드도 넣고 싶은데.",0],
+    ["b1","assistant","14:44","가능합니다만 규모가 큽니다. tantivy IndexWriter는 blocking API라 spawn_blocking 경유가 필요하고, walkdir·파서 경로가 전부 async로 바뀝니다. 단계별 계획을 세워서 진행해 보겠습니다.",0],
+    ["b2","user","14:47","일단 main.rs부터 async로 바꿔보자.",0],
+    ["b3","assistant","14:52","#[tokio::main] 전환하고 walkdir를 async-walkdir로 교체했습니다. 컴파일은 통과합니다.",2],
+    ["b4","assistant","14:58","문제 발견: IndexWriter가 !Sync라 task 간 공유가 안 됩니다. Arc<Mutex<IndexWriter>>로 감싸면 사실상 전부 직렬화되어 async의 이점이 사라집니다.",0],
+    ["b5","user","15:05","borrow checker 에러도 계속 나네… error[E0597]: writer does not live long enough. 이거 왜 이래?",0],
+    ["b6","assistant","15:10","spawn된 task가 'static을 요구해서 lifetime이 충돌합니다. 해결하려면 소유권 구조를 전면 개편해야 하는데, 원래 목표(인덱싱 속도)만 보면 rayon 파일 병렬화가 훨씬 단순하고 충분합니다. 되돌아가는 것을 권합니다.",0],
+  ];
+  const brC = [
+    ["c0","user","15:31","abandoned branch는 인덱스에서 아예 빼고, 원본 JSONL에만 남겨두는 건 어때?",0],
+    ["c1","assistant","15:33","빼면 \"그때 다른 시도가 뭐였지?\" 류의 검색이 불가능해집니다. episodic memory 취지상 abandoned도 검색 대상이어야 합니다.",0],
+    ["c2","user","15:36","그럼 검색 결과에 노이즈가 많아지지 않아? 실패한 시도가 상위에 뜨면 헷갈릴 텐데.",0],
+    ["c3","assistant","15:39","branch_status 필드로 기본 필터링하고, 명시적으로 include:abandoned일 때만 노출하면 됩니다. 랭킹에서 abandoned에 감점을 주는 방법도 있습니다.",0],
+  ];
+
+  // 체인들을 links/messages로 변환 (tool step 삽입 포함)
+  function build(chains, forkAttach) {
+    const events = []; // {id, role, hm, content|null, kind?}
+    const prevOf = {}; // id → parent id
+    chains.forEach(chain => {
+      let prev = null;
+      chain.forEach(([id, role, hm, content, toolsBefore, kind]) => {
+        for (let k = 0; k < (toolsBefore || 0); k++) {
+          const tid = `${id}-t${k}`;
+          prevOf[tid] = prev; prev = tid;
+          // 대부분 kind:"tool" 요약 content, 일부는 구형 서버 호환용 content 없는 step
+          const legacy = id === "m1" && k === 0;
+          events.push({
+            id: tid, role: "assistant", hm, sec: 10 + k * 5,
+            content: legacy ? null : `Tool: ${["Bash", "Read", "Edit", "Grep"][k % 4]}\n→ ${id} 단계 ${k + 1} 실행 · 요약 로그`,
+            kind: legacy ? undefined : "tool",
+          });
+        }
+        prevOf[id] = prev; prev = id;
+        events.push({ id, role, hm, sec: 30, content, kind });
+      });
+    });
+    Object.entries(forkAttach).forEach(([childId, parentId]) => { prevOf[childId] = parentId; });
+    events.sort((a, b) => (a.hm + pad(a.sec)).localeCompare(b.hm + pad(b.sec)));
+    const links = [], messages = {};
+    events.forEach((e, i) => {
+      links.push({ uuid: e.id, parent_uuid: prevOf[e.id] || null, line_no: i + 1, role: e.role, has_content: e.content != null });
+      if (e.content != null) {
+        messages[e.id] = { role: e.role, ts: iso(e.hm, e.sec), content: e.content };
+        if (e.kind) messages[e.id].kind = e.kind; // kind 생략 = "text"
+      }
+    });
+    return { links, messages };
+  }
+
+  const forked = build([main, brA, brB, brC], { a0: "m4", "a0-t0": "m4", b0: "m12", c0: "m18" });
+  // (brA 첫 노드에 tool step이 없으므로 a0→m4만 유효; 방어적으로 둘 다 지정해도 무해)
+
+  const linear = build([[
+    ["l0","user","09:12","Cargo.toml에서 tantivy를 0.22로 올리면 breaking change 있어?",0],
+    ["l1","assistant","09:14","0.21 → 0.22는 Schema builder API가 바뀌었고 IndexSettings에서 sort_by_field가 제거되었습니다. 우리 코드에서는 두 곳이 영향을 받습니다.",1],
+    ["l2","user","09:16","고쳐서 올려줘.",0],
+    ["l3","assistant","09:21","업그레이드 완료. schema.rs와 indexer.rs 수정, 테스트 전부 통과합니다.",3],
+    ["l4","user","09:23","좋아, 커밋해줘.",0],
+    ["l5","assistant","09:24","커밋 완료: chore(deps): bump tantivy to 0.22 (7c21e90).",1],
+  ]], {});
+
+  const sessions = [
+    { id: "demo-fork-0001", project: "C--Users-dev-session-brain", project_name: "session-brain",
+      title: "rust-indexer 인덱싱 panic 디버깅 & 병렬화", first_ts: iso("14:02"), last_ts: iso("15:57"),
+      user_msgs: 12, assistant_msgs: 13, subagents: 0 },
+    { id: "demo-linear-0002", project: "C--Users-dev-session-brain", project_name: "session-brain",
+      title: "tantivy 0.22 업그레이드 (선형 세션)", first_ts: iso("09:12"), last_ts: iso("09:24"),
+      user_msgs: 3, assistant_msgs: 3, subagents: 0 },
+  ];
+  const details = {
+    "demo-fork-0001": { meta: Object.assign({}, sessions[0], { cwd: "C:\\Users\\dev\\session-brain", git_branch: "main" }), links: forked.links, messages: forked.messages },
+    "demo-linear-0002": { meta: Object.assign({}, sessions[1], { cwd: "C:\\Users\\dev\\session-brain", git_branch: "main" }), links: linear.links, messages: linear.messages },
+  };
+
+  function search(q, project) {
+    const ql = (q || "").toLowerCase();
+    const hits = [];
+    for (const [sid, d] of Object.entries(details)) {
+      const meta = d.meta;
+      if (project && !(meta.project_name || "").toLowerCase().includes(project.toLowerCase())) continue;
+      for (const [uuid, msg] of Object.entries(d.messages)) {
+        const idx = msg.content.toLowerCase().indexOf(ql);
+        if (idx < 0) continue;
+        const s = Math.max(0, idx - 60), e = Math.min(msg.content.length, idx + ql.length + 90);
+        const raw = msg.content.slice(s, e).replace(/\s+/g, " ");
+        const pos = idx - s;
+        const snippet = (s > 0 ? "…" : "") + raw.slice(0, pos) + "[" + raw.slice(pos, pos + q.length) + "]" + raw.slice(pos + q.length) + (e < msg.content.length ? "…" : "");
+        hits.push({ session_id: sid, project: meta.project_name, title: meta.title, role: msg.role, ts: msg.ts, snippet, kind: "main" });
+        if (hits.length >= 20) break;
+      }
+    }
+    return { hits, scan_total: Object.keys(details).length, semantic_note: "semantic pass skipped: 데모 모드 (키워드 검색만 수행)" };
+  }
+
+  return { sessions, details, search };
+})();
+
+/* ============================================================================
+   Router
+   ============================================================================ */
+
+function route() {
+  const h = location.hash || "#/";
+  document.getElementById("navList").classList.toggle("active", h === "#/" || h.startsWith("#/session/"));
+  document.getElementById("navSearch").classList.toggle("active", h.startsWith("#/search"));
+  let m;
+  if ((m = h.match(/^#\/session\/(.+)$/))) viewSession(decodeURIComponent(m[1]));
+  else if (h.startsWith("#/search")) viewSearch();
+  else viewList();
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>

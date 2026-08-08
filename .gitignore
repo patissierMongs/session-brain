@@ -1,0 +1,11 @@
+/target
+node_modules/
+web/dist/
+*.db
+*.db-wal
+*.db-shm
+
+# Machine-local build config (Windows/MSYS2 GNU toolchain pin) — keep these
+# on the machine, not in the repo. See README "Windows build".
+/rust-toolchain.toml
+/.cargo/config.toml
