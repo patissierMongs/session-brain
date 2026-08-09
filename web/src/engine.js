@@ -69,20 +69,44 @@ let ROOT = null;
   }
   nodes.forEach((n) => {
     if (n.p && nodes.has(n.p)) nodes.get(n.p).children.push(n);
-    else if (!ROOT) ROOT = n;
-    else n.p = null;
   });
-  // multiple roots → keep the earliest as ROOT, attach others as its siblings via a virtual root
-  const roots = [...nodes.values()].filter((n) => !n.p || !nodes.has(n.p));
-  roots.sort((x, y) => x.line - y.line);
-  if (roots.length > 1) {
-    ROOT = { id: "__vroot", p: null, role: "assistant", kind: "tool", hm: "", ts: "", text: "", hasContent: false, line: -1, children: roots, virtual: true };
-    roots.forEach((r) => (r.p = "__vroot"));
-    nodes.set("__vroot", ROOT);
-  } else {
-    ROOT = roots[0];
-  }
+  let roots = [...nodes.values()].filter((n) => !n.p || !nodes.has(n.p));
+  // 1) prune: subtrees with no content anywhere (dangling metadata chains —
+  //    ai-title / queue-operation / last-prompt records linked but never indexed)
+  const hasContentDeep = (n) => n.hasContent || n.children.some(hasContentDeep);
+  const dropDeep = (n) => { nodes.delete(n.id); n.children.forEach(dropDeep); };
+  const pruneKids = (n) => {
+    n.children.filter((c) => !hasContentDeep(c)).forEach(dropDeep);
+    n.children = n.children.filter((c) => nodes.has(c.id));
+    n.children.forEach(pruneKids);
+  };
+  roots.filter((r) => !hasContentDeep(r)).forEach(dropDeep);
+  roots = roots.filter((r) => nodes.has(r.id));
+  roots.forEach(pruneKids);
+  // 2) splice: content-less pass-through nodes (attachment/system/compact records
+  //    that real logs chain parentUuid through). A single-child node without
+  //    content is structure, not conversation — cut it out of the chain.
+  const advance = (n) => { while (!n.hasContent && n.children.length === 1) { nodes.delete(n.id); n = n.children[0]; } return n; };
+  const spliceKids = (n) => {
+    n.children = n.children.map((c) => { const k = advance(c); k.p = n.id; return k; });
+    n.children.forEach(spliceKids);
+  };
+  roots = roots.map((r) => { const k = advance(r); k.p = null; return k; });
+  roots.forEach(spliceKids);
   nodes.forEach((n) => n.children.sort((x, y) => x.line - y.line));
+  // 3) multiple roots are CONTINUATION segments (compaction boundaries, chain
+  //    gaps), not forks — chain each segment onto the tip of the previous one.
+  roots.sort((x, y) => x.line - y.line);
+  if (!roots.length) roots = [{ id: "__empty", p: null, role: "assistant", kind: "text", hm: "", ts: "", text: "(빈 세션)", hasContent: true, line: 0, children: [] }];
+  ROOT = roots[0];
+  for (let i = 1; i < roots.length; i++) {
+    let tip = ROOT;
+    const st = [ROOT];
+    while (st.length) { const n = st.pop(); if (n.line > tip.line) tip = n; n.children.forEach((c) => st.push(c)); }
+    tip.children.push(roots[i]);
+    roots[i].p = tip.id;
+  }
+  nodes.set(ROOT.id, ROOT);
   const order = [];
   const st = [ROOT];
   while (st.length) { const n = st.pop(); order.push(n); n.children.forEach((c) => st.push(c)); }

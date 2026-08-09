@@ -357,6 +357,19 @@ fn index_file(
             if raw.git_branch.is_some() {
                 m.git_branch = raw.git_branch.clone();
             }
+            // Record parent linkage for EVERY line with a uuid — including
+            // attachment/system/progress records we never index as content.
+            // Real logs chain parentUuid THROUGH those records; dropping them
+            // from links shatters the tree into spurious "fork" roots.
+            if let Some(u) = &raw.uuid {
+                ins_link.execute(params![
+                    u,
+                    sid,
+                    raw.parent_uuid,
+                    (i + 1) as i64,
+                    raw.kind.as_deref().unwrap_or("unknown")
+                ])?;
+            }
             match raw.kind.as_deref() {
                 Some("ai-title") => {
                     if raw.ai_title.is_some() {
@@ -369,18 +382,6 @@ fn index_file(
                     }
                 }
                 Some(role) if role == "user" || role == "assistant" => {
-                    // Record parent linkage for EVERY line with a uuid — even
-                    // tool steps we don't index as content. The branch tree
-                    // needs the complete chain.
-                    if let Some(u) = &raw.uuid {
-                        ins_link.execute(params![
-                            u,
-                            sid,
-                            raw.parent_uuid,
-                            (i + 1) as i64,
-                            role
-                        ])?;
-                    }
                     let Some(msg) = &raw.message else { continue };
                     let Some(text) = parser::extract_text(&msg.content) else {
                         // Thinking-only lines: stored with kind='thinking' so the

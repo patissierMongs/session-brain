@@ -57,7 +57,10 @@ msg("ch", "a3", "assistant", [
   { type: "tool_use", name: "AskUserQuestion", input: { questions: [{ question: "다음 최적화 방향은?", options: [{ label: "simd-json 도입" }, { label: "rayon 병렬화" }] }] } },
 ], 22);
 msg("chr", "ch", "user", [{ type: "tool_result", content: '{"다음 최적화 방향은?":"rayon 병렬화"}' }], 23);
-msg("u3", "chr", "user", "rayon으로 구현해줘.", 25);
+// attachment record mid-chain: real logs thread parentUuid THROUGH these —
+// must not break the tree into a fake fork
+line({ type: "attachment", uuid: "att1", parentUuid: "chr", sessionId: SID, timestamp: T(24) });
+msg("u3", "att1", "user", "rayon으로 구현해줘.", 25);
 msg("a4", "u3", "assistant", [{ type: "text", text: "구현했습니다. 4m02s → 41s (5.9배)." }], 30);
 // Fork B with nested fork
 msg("fb0", "a4", "user", "잠깐, tokio async 전면 재작성은 어때?", 32);
@@ -65,6 +68,13 @@ msg("fb1", "fb0", "assistant", [{ type: "text", text: "규모가 큽니다. Inde
 msg("fc0", "fb1", "user", "async-std는?", 36);
 msg("u4", "a4", "user", "됐고, 이대로 커밋해줘.", 40);
 msg("a5", "u4", "assistant", [{ type: "text", text: "커밋 완료: feat(indexer): rayon parallel indexing" }], 42);
+// compaction boundary: post-compact records start a NEW root segment —
+// must render as continuation of the main thread, not as a fork
+line({ type: "system", subtype: "compact_boundary", uuid: "sys1", parentUuid: null, sessionId: SID, timestamp: T(44) });
+msg("u5", "sys1", "user", "컴팩션 후에도 이어서: 릴리즈 노트 정리해줘.", 45);
+msg("a6", "u5", "assistant", [{ type: "text", text: "릴리즈 노트 초안입니다." }], 46);
+// dangling metadata record with uuid but no chain participation — must be pruned
+line({ type: "queue-operation", uuid: "qo1", parentUuid: null, sessionId: SID, timestamp: T(47) });
 
 writeFileSync(join(proj, `${SID}.jsonl`), lines.join("\n") + "\n");
 

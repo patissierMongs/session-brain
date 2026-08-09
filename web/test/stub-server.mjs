@@ -52,14 +52,23 @@ function mkSession(id, title, opts = {}) {
     kind: "tool",
   });
   const chr = push("chr", ch, "user", { ts: T(14, 23), content: '→ {"다음 최적화 방향은?":"rayon 병렬화"}', kind: "tool" });
-  const u3 = push("u3", chr, "user", { ts: T(14, 25), content: "rayon으로 구현해줘." });
+  // attachment pass-through (link only, no content) — viewer must splice, not fork
+  const att1 = push("att1", chr, "attachment", null);
+  const u3 = push("u3", att1, "user", { ts: T(14, 25), content: "rayon으로 구현해줘." });
   // Fork B from u3's answer point (nested fork inside)
   const a4 = push("a4", u3, "assistant", { ts: T(14, 30), content: "구현했습니다. 4m02s → 41s (5.9배)." });
   const fb0 = push("fb0", a4, "user", { ts: T(14, 32), content: "잠깐, tokio async 전면 재작성은 어때?" });
   const fb1 = push("fb1", fb0, "assistant", { ts: T(14, 34), content: "규모가 큽니다. IndexWriter가 blocking이라 이점이 제한적입니다." });
   push("fc0", fb1, "user", { ts: T(14, 36), content: "async-std는?" });
   const u4 = push("u4", a4, "user", { ts: T(14, 40), content: "됐고, 이대로 커밋해줘." });
-  push("a5", u4, "assistant", { ts: T(14, 42), content: "커밋 완료: feat(indexer): rayon parallel indexing" });
+  const a5 = push("a5", u4, "assistant", { ts: T(14, 42), content: "커밋 완료: feat(indexer): rayon parallel indexing" });
+  void a5;
+  // compaction boundary: new root segment — viewer must chain it as continuation
+  const sys1 = push("sys1", null, "system", null);
+  const u5 = push("u5", sys1, "user", { ts: T(14, 45), content: "컴팩션 후에도 이어서: 릴리즈 노트 정리해줘." });
+  push("a6", u5, "assistant", { ts: T(14, 46), content: "릴리즈 노트 초안입니다." });
+  // dangling metadata record — viewer must prune
+  push("qo1", null, "queue-operation", null);
 
   const um = Object.values(messages).filter((m) => m.role === "user" && m.kind === "text").length;
   const am = Object.values(messages).filter((m) => m.role === "assistant" && m.kind === "text").length;
